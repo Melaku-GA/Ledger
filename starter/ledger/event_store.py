@@ -17,9 +17,23 @@ import asyncpg
 
 
 class OptimisticConcurrencyError(Exception):
-    """Raised when expected_version doesn't match current stream version."""
+    """
+    Raised when expected_version doesn't match current stream version.
+    
+    Attributes:
+        stream_id: The ID of the stream where the conflict occurred
+        expected: The version the caller expected
+        actual: The actual current version of the stream
+    """
+    # Explicit typed attributes for type-checker friendliness
+    stream_id: str
+    expected: int
+    actual: int
+    
     def __init__(self, stream_id: str, expected: int, actual: int):
-        self.stream_id = stream_id; self.expected = expected; self.actual = actual
+        self.stream_id = stream_id
+        self.expected = expected
+        self.actual = actual
         super().__init__(f"OCC on '{stream_id}': expected v{expected}, actual v{actual}")
 
 

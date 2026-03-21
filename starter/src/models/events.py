@@ -35,26 +35,54 @@ class OptimisticConcurrencyError(EventStoreError):
     This is the critical concurrency control mechanism - two agents
     attempting to append to the same stream simultaneously will have
     one succeed and one raise this error.
+    
+    Attributes:
+        stream_id: The ID of the stream where the conflict occurred
+        expected: The version the caller expected
+        actual: The actual current version of the stream
     """
+    # Explicit typed attributes for type-checker friendliness
+    stream_id: str
+    expected: int
+    actual: int
+    
     def __init__(self, stream_id: str, expected: int, actual: int):
         self.stream_id = stream_id
         self.expected = expected
         self.actual = actual
         super().__init__(
-            f"OptimisticConcurrencyError on stream '{stream_id}': "
-            f"expected version {expected}, actual version {actual}"
+            f"OCC on '{stream_id}': expected v{expected}, actual v{actual}"
         )
 
 
 class DomainError(EventStoreError):
-    """Raised when a business rule is violated."""
+    """
+    Raised when a business rule is violated.
+    
+    Attributes:
+        message: The error message describing the violation
+        stream_id: Optional stream ID where the violation occurred
+    """
+    # Explicit typed attributes
+    message: str
+    stream_id: Optional[str]
+    
     def __init__(self, message: str, stream_id: Optional[str] = None):
+        self.message = message
         self.stream_id = stream_id
         super().__init__(message)
 
 
 class StreamNotFoundError(EventStoreError):
-    """Raised when attempting to load a stream that doesn't exist."""
+    """
+    Raised when attempting to load a stream that doesn't exist.
+    
+    Attributes:
+        stream_id: The ID of the stream that was not found
+    """
+    # Explicit typed attribute
+    stream_id: str
+    
     def __init__(self, stream_id: str):
         self.stream_id = stream_id
         super().__init__(f"Stream not found: {stream_id}")
