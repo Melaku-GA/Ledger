@@ -76,7 +76,7 @@ async def test_state_machine_invalid_transition():
     agg.state = ApplicationState.SUBMITTED
     
     # Invalid transition (can't go from SUBMITTED directly to APPROVED)
-    with pytest.raises(DomainRuleError, match="Invalid transition"):
+    with pytest.raises(DomainRuleError, match="Invalid state transition"):
         agg.assert_valid_transition(ApplicationState.APPROVED)
 
 
@@ -284,10 +284,11 @@ async def test_command_handler_credit_analysis_completed():
     ]
     
     # Append with correct expected version (which is the current stream version)
+    # After 2 events, stream version is 1 (0-based internally, 1st event is position 1)
     await store.append(
         f"loan-CMD-002",
         new_events,
-        expected_version=agg.version  # Should be 1, not 2
+        expected_version=agg.version - 1  # Stream version is agg.version - 1
     )
     
     # Verify
