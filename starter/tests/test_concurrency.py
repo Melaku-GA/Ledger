@@ -81,11 +81,27 @@ async def test_double_decision_concurrency():
     assert len(successes) == 1, f"Expected exactly 1 success, got {len(successes)}"
     assert len(occ_errors) == 1, f"Expected exactly 1 OCC error, got {len(occ_errors)}"
     
-    # Verify: Winning agent's event is at position 3 (1-indexed)
+    # ENHANCED: Verify stream event count explicitly
+    events = await store.load_stream("loan-TEST-001")
+    assert len(events) == 4, f"Expected 4 events in stream (3 original + 1 new), got {len(events)}"
+    
+    # ENHANCED: Verify winning event's stream position explicitly
     success_positions = successes[0][1]
     assert success_positions == [3], f"Expected position [3], got {success_positions}"
     
-    # Verify: Total stream length = 3 (not 4 - which would indicate both succeeded)
+    # ENHANCED: Verify the actual event content at that position
+    winning_event = events[3]  # Index 3 = position 3
+    assert winning_event["event_type"] == "AgentA_Decision" or winning_event["event_type"] == "AgentB_Decision"
+    
+    # ENHANCED: Assert on the exact OptimisticConcurrencyError instance
+    occ_error = occ_errors[0][1]
+    assert isinstance(occ_error, OptimisticConcurrencyError), "Error must be OptimisticConcurrencyError"
+    assert occ_error.stream_id == "loan-TEST-001", f"Expected stream_id 'loan-TEST-001', got {occ_error.stream_id}"
+    assert occ_error.expected == 2, f"Expected version 2, got {occ_error.expected}"
+    # The actual version is 3 because the winning agent already appended, advancing the stream
+    assert occ_error.actual == 3, f"Expected actual version 3 (stream advanced after winner), got {occ_error.actual}"
+    
+    # Verify: Total stream version = 3 (not 4 - which would indicate both succeeded)
     final_version = await store.stream_version("loan-TEST-001")
     assert final_version == 3, f"Expected final version 3, got {final_version}"
     
@@ -94,8 +110,10 @@ async def test_double_decision_concurrency():
     print("="*60)
     print("[OK] Exactly one agent succeeded")
     print("[OK] One agent received OptimisticConcurrencyError")
+    print(f"[OK] Stream has exactly {len(events)} events (not 5)")
     print(f"[OK] Stream version = {final_version} (not 4)")
     print(f"[OK] Winning event at position: {success_positions}")
+    print(f"[OK] OCC error: stream_id={occ_error.stream_id}, expected={occ_error.expected}, actual={occ_error.actual}")
     print("="*60)
 
 

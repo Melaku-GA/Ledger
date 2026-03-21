@@ -15,7 +15,13 @@ from typing import Optional
 from datetime import datetime
 
 
-async def handle_submit_application(store, application_id: str, **application_data) -> dict:
+async def handle_submit_application(
+    store, 
+    application_id: str, 
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
+    **application_data
+) -> dict:
     """
     Handle Submit Application command.
     
@@ -42,11 +48,17 @@ async def handle_submit_application(store, application_id: str, **application_da
         }
     }
     
-    # 4. Append to store
+    # Generate unique causation_id if not provided
+    if causation_id is None:
+        causation_id = f"submit-{application_id}"
+    
+    # 4. Append to store with correlation and causation tracking
     await store.append(
         f"loan-{application_id}",
         [event],
         expected_version=agg.version,
+        correlation_id=correlation_id,
+        causation_id=causation_id,
     )
     
     return {"status": "submitted", "application_id": application_id}
@@ -62,6 +74,8 @@ async def handle_credit_analysis_completed(
     risk_tier: str,
     recommended_limit_usd: float,
     input_data: dict,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
 ) -> dict:
     """
     Handle Credit Analysis Completed command.
@@ -69,19 +83,33 @@ async def handle_credit_analysis_completed(
     Business Rules:
     - Context must be loaded (Gas Town pattern via agent session)
     - Confidence floor: confidence < 0.6 → referral
+    - Loads both loan and agent session aggregates for validation
     """
     from src.aggregates.loan_application import LoanApplicationAggregate
+    from src.aggregates.agent_session import AgentSessionAggregate
     
-    # 1. Load current state
-    agg = await LoanApplicationAggregate.load(store, application_id)
+    # 1. Load BOTH aggregates - loan application AND agent session
+    loan_agg = await LoanApplicationAggregate.load(store, application_id)
+    agent_agg = await AgentSessionAggregate.load(store, agent_id, session_id)
     
-    # 2. Validate business rules
-    agg.assert_can_complete_credit_analysis()
+    # 2. Validate business rules on BOTH aggregates
+    # Loan application state must allow credit analysis completion
+    loan_agg.assert_can_complete_credit_analysis()
+    
+    # Agent session must have context loaded (Gas Town pattern enforcement)
+    agent_agg.assert_context_loaded()
+    
+    # Agent session must be using current model version
+    agent_agg.assert_model_version_current(model_version)
     
     # 3. Apply confidence floor rule
     if confidence_score < 0.6:
         # Would force referral in decision
         pass
+    
+    # Generate unique causation_id if not provided
+    if causation_id is None:
+        causation_id = f"credit-analysis-{application_id}-{session_id}"
     
     # Determine new events
     event = {
@@ -99,12 +127,13 @@ async def handle_credit_analysis_completed(
         }
     }
     
-    # 4. Append to store with OCC
+    # 4. Append to store with OCC, passing correlation_id and causation_id
     await store.append(
         f"loan-{application_id}",
         [event],
-        expected_version=agg.version,
-        correlation_id=session_id,
+        expected_version=loan_agg.version,
+        correlation_id=correlation_id or session_id,
+        causation_id=causation_id,
     )
     
     return {
@@ -121,6 +150,8 @@ async def handle_generate_decision(
     confidence_score: float,
     recommendation: str,
     contributing_sessions: list[str],
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
 ) -> dict:
     """
     Handle Generate Decision command.
@@ -142,6 +173,10 @@ async def handle_generate_decision(
     if confidence_score < 0.6:
         recommendation = "REFER"
     
+    # Generate unique causation_id if not provided
+    if causation_id is None:
+        causation_id = f"decision-{application_id}"
+    
     # Determine new events
     event = {
         "event_type": "DecisionGenerated",
@@ -156,11 +191,13 @@ async def handle_generate_decision(
         }
     }
     
-    # 4. Append
+    # 4. Append with causal chain tracking
     await store.append(
         f"loan-{application_id}",
         [event],
         expected_version=agg.version,
+        correlation_id=correlation_id,
+        causation_id=causation_id,
     )
     
     return {
@@ -177,6 +214,8 @@ async def handle_human_review(
     override: bool,
     final_decision: str,
     override_reason: Optional[str] = None,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
 ) -> dict:
     """
     Handle Human Review Completed command.
@@ -189,6 +228,10 @@ async def handle_human_review(
     # 2. Validate
     if override and not override_reason:
         raise ValueError("Override requires override_reason")
+    
+    # Generate unique causation_id if not provided
+    if causation_id is None:
+        causation_id = f"human-review-{application_id}"
     
     # Determine new events
     event = {
@@ -203,11 +246,13 @@ async def handle_human_review(
         }
     }
     
-    # 4. Append
+    # 4. Append with causal chain tracking
     await store.append(
         f"loan-{application_id}",
         [event],
         expected_version=agg.version,
+        correlation_id=correlation_id,
+        causation_id=causation_id,
     )
     
     return {
@@ -224,6 +269,8 @@ async def handle_final_approval(
     interest_rate: float,
     approved_by: str,
     effective_date: str,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
 ) -> dict:
     """
     Handle Final Approval command.
@@ -238,6 +285,10 @@ async def handle_final_approval(
     # 2. Validate compliance
     agg.assert_can_approve()
     
+    # Generate unique causation_id if not provided
+    if causation_id is None:
+        causation_id = f"approval-{application_id}"
+    
     # Determine new events
     event = {
         "event_type": "ApplicationApproved",
@@ -251,11 +302,13 @@ async def handle_final_approval(
         }
     }
     
-    # 4. Append
+    # 4. Append with causal chain tracking
     await store.append(
         f"loan-{application_id}",
         [event],
         expected_version=agg.version,
+        correlation_id=correlation_id,
+        causation_id=causation_id,
     )
     
     return {
