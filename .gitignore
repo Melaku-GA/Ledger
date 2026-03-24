@@ -7,3 +7,6 @@ __pycache__/
 *.log
 .vscode/
 .documents/
+VIDEO_DEMO_GUIDE.md
+PROGRESS.md
+DOMAIN_NOTES.md
