@@ -10,7 +10,7 @@ Implements:
 
 The Gas Town Persistent Ledger Pattern:
 Every agent action is written to the event store as an event BEFORE the action is executed.
-On restart, the agent replays its event stream to reconstruct its context window.
+On restart, the agent replays its event stream to reconstruct its context window. 
 """
 from __future__ import annotations
 from dataclasses import dataclass, field

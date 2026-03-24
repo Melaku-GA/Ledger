@@ -13,7 +13,7 @@ cp .env.example .env
 # Edit .env — add your ANTHROPIC_API_KEY
 
 # 4. Generate all data (companies + documents + seed events → DB)
-python datagen/generate_all.py --db-url postgresql://postgres:apex@localhost/apex_ledger
+python datagen/generate_all.py --db-url postgresql://postgres:123@localhost/apex_ledger
 
 # 5. Validate schema (no DB needed)
 python datagen/generate_all.py --skip-db --skip-docs --validate-only

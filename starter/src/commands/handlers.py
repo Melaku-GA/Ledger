@@ -30,10 +30,15 @@ async def handle_submit_application(
     from src.aggregates.loan_application import LoanApplicationAggregate
     
     # 1. Load current state (or create new)
-    try:
-        agg = await LoanApplicationAggregate.load(store, application_id)
-    except Exception:
-        agg = LoanApplicationAggregate(application_id=application_id)
+    events = await store.load_stream(f"loan-{application_id}")
+    
+    agg = LoanApplicationAggregate(application_id=application_id)
+    if events:
+        for event in events:
+            agg.apply(event)
+    else:
+        # New stream - set version to -1 so append works with expected_version=-1
+        agg.version = -1
     
     # 2. Validate business rules
     agg.assert_can_submit_application()
@@ -368,4 +373,128 @@ async def handle_start_agent_session(
         "status": "session_started",
         "agent_id": agent_id,
         "session_id": session_id,
+    }
+
+
+async def handle_fraud_screening_completed(
+    store,
+    application_id: str,
+    agent_id: str,
+    session_id: str,
+    fraud_score: float,
+    anomaly_flags: list[str],
+    screening_model_version: str,
+    input_data: dict,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
+) -> dict:
+    """
+    Handle Fraud Screening Completed command.
+    
+    Business Rules:
+    - Application must be in correct state (after credit analysis)
+    - Agent must have context loaded (Gas Town pattern)
+    """
+    from src.aggregates.loan_application import LoanApplicationAggregate
+    from src.aggregates.agent_session import AgentSessionAggregate
+    
+    # 1. Load aggregates
+    loan_agg = await LoanApplicationAggregate.load(store, application_id)
+    agent_agg = await AgentSessionAggregate.load(store, agent_id, session_id)
+    
+    # 2. Validate business rules
+    loan_agg.assert_can_complete_fraud_screening()
+    agent_agg.assert_context_loaded()
+    
+    # Generate unique causation_id if not provided
+    if causation_id is None:
+        causation_id = f"fraud-screening-{application_id}-{session_id}"
+    
+    # 3. Determine new events
+    event = {
+        "event_type": "FraudScreeningCompleted",
+        "event_version": 1,
+        "payload": {
+            "application_id": application_id,
+            "agent_id": agent_id,
+            "fraud_score": fraud_score,
+            "anomaly_flags": anomaly_flags,
+            "screening_model_version": screening_model_version,
+            "input_data_hash": str(hash(str(input_data))),
+        }
+    }
+    
+    # 4. Append with OCC
+    await store.append(
+        f"loan-{application_id}",
+        [event],
+        expected_version=loan_agg.version,
+        correlation_id=correlation_id or session_id,
+        causation_id=causation_id,
+    )
+    
+    return {
+        "status": "completed",
+        "application_id": application_id,
+        "fraud_score": fraud_score,
+    }
+
+
+async def handle_compliance_check(
+    store,
+    application_id: str,
+    rule_id: str,
+    rule_version: str,
+    passed: bool,
+    evidence_hash: Optional[str] = None,
+    failure_reason: Optional[str] = None,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
+) -> dict:
+    """
+    Handle Compliance Check command.
+    """
+    from src.aggregates.loan_application import LoanApplicationAggregate, ApplicationState, DomainError
+    
+    # 1. Load current state
+    agg = await LoanApplicationAggregate.load(store, application_id)
+    
+    # 2. Validate - must be in compliance review or after analyses
+    if not (agg.state.name.startswith("CREDIT") or 
+            agg.state.name.startswith("FRAUD") or
+            agg.state == ApplicationState.COMPLIANCE_REVIEW):
+        raise DomainError(f"Cannot perform compliance check: current state is {agg.state}")
+    
+    # Generate unique causation_id if not provided
+    if causation_id is None:
+        causation_id = f"compliance-{application_id}-{rule_id}"
+    
+    # 3. Determine new events
+    event_type = "ComplianceRulePassed" if passed else "ComplianceRuleFailed"
+    event = {
+        "event_type": event_type,
+        "event_version": 1,
+        "payload": {
+            "application_id": application_id,
+            "rule_id": rule_id,
+            "rule_version": rule_version,
+            "evidence_hash": evidence_hash,
+            "failure_reason": failure_reason,
+        }
+    }
+    
+    # 4. Append
+    await store.append(
+        f"loan-{application_id}",
+        [event],
+        expected_version=agg.version,
+        correlation_id=correlation_id,
+        causation_id=causation_id,
+    )
+    
+    return {
+        "status": "completed",
+        "application_id": application_id,
+        "rule_id": rule_id,
+        "passed": passed,
     }
