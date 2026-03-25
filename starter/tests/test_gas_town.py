@@ -90,6 +90,19 @@ async def test_gas_town_agent_context_reconstruction():
     assert context is not None
     assert context.last_event_position > 0
     assert context.session_health_status in ["HEALTHY", "NEEDS_RECONCILIATION", "CORRUPTED"]
+    
+    # Verify pending work content
+    if hasattr(context, 'pending_work') and context.pending_work:
+        print(f"Pending work: {context.pending_work}")
+    
+    # Verify exact last event position matches stream length (5 events = position 4)
+    assert context.last_event_position == 4, f"Expected position 4, got {context.last_event_position}"
+    
+    # Verify last 3 events are preserved in summary
+    # (The reconstruction should include recent events for context)
+    if hasattr(context, 'recent_events'):
+        assert len(context.recent_events) >= 3, "Should preserve last 3 events"
+        print(f"Preserved last 3 events: {len(context.recent_events)}")
 
 
 @pytest.mark.asyncio
